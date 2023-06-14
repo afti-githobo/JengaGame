@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Math/Vector.h"
 #include "JGCharacterMovementComponent.generated.h"
 
 /**
@@ -31,4 +32,11 @@ public:
 	/** Tether force. */
 	UPROPERTY(Category = "Character Movement (General Settings)", EditAnywhere, BlueprintReadWrite)
 		float TetherForce;
+
+	/** Tether cutoff time. */
+	UPROPERTY(Category = "Character Movement (General Settings)", EditAnywhere, BlueprintReadWrite)
+		float TetherCutoff;
+
+private:
+	float TetherCutoffTimer;
 };

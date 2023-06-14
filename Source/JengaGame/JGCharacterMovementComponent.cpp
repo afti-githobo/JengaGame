@@ -69,6 +69,14 @@ void UJGCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations
 		FHitResult Hit(1.f);
 		SafeMoveUpdatedComponent(Adjusted, PawnRotation, true, Hit);
 
+		if (Hit.GetActor() == TetherActor) {
+			TetherCutoffTimer = 0;
+			// todo: this shouldn't be hardcoded, unify behavior between cpp/bp
+			GravityScale = 3.33;
+			GroundFriction = 8;
+			SetMovementMode(EMovementMode::MOVE_Falling);
+		}
+
 		if (!HasValidData())
 		{
 			return;
@@ -195,24 +203,19 @@ void UJGCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations
 		{
 			Velocity.X = 0.f;
 			Velocity.Y = 0.f;
+			TetherCutoffTimer += timeTick;
+			if (TetherCutoffTimer >= TetherCutoff) 
+			{
+				TetherCutoffTimer = 0;
+				// todo: this shouldn't be hardcoded, unify behavior between cpp/bp
+				GravityScale = 3.33;
+				GroundFriction = 8;
+				SetMovementMode(EMovementMode::MOVE_Falling);
+			}
+		}
+		else 
+		{
+			TetherCutoffTimer = 0;
 		}
 	}
-	return;
-
-	// below this: old implementation
-
-	//todo: should use subtypes but only one atm
-	if (deltaTime < MIN_TICK_TIME)
-	{
-		return;
-	}
-	//float remainingTime = deltaTime;
-	while ((remainingTime >= MIN_TICK_TIME) && (Iterations < MaxSimulationIterations)) {
-		Iterations++;
-		float timeTick = GetSimulationTimeStep(remainingTime, Iterations);
-		remainingTime -= timeTick;
-
-	}
-	// fall thru to falling behavior
-	UCharacterMovementComponent::PhysFalling(deltaTime, Iterations);
 }
