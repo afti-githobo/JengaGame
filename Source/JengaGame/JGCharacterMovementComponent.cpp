@@ -85,137 +85,128 @@ void UJGCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations
 		float LastMoveTimeSlice = timeTick;
 		float subTimeTickRemaining = timeTick * (1.f - Hit.Time);
 
-		if (IsSwimming()) //just entered water
+
+		if (Hit.bBlockingHit)
 		{
-			remainingTime += subTimeTickRemaining;
-			StartSwimming(OldLocation, OldVelocity, timeTick, remainingTime, Iterations);
-			return;
-		}
-		else if (Hit.bBlockingHit)
-		{
-			if (IsValidLandingSpot(UpdatedComponent->GetComponentLocation(), Hit))
+			if (Hit.ImpactNormal.Z < 0) 
 			{
-				remainingTime += subTimeTickRemaining;
-				ProcessLanded(Hit, remainingTime, Iterations);
-				return;
+				TetherCutoffTimer = TetherCutoff;
 			}
-			else
+			// Compute impact deflection based on final velocity, not integration step.
+			// This allows us to compute a new velocity from the deflected vector, and ensures the full gravity effect is included in the slide result.
+			Adjusted = Velocity * timeTick;
+
+			// See if we can convert a normally invalid landing spot (based on the hit result) to a usable one.
+			if (!Hit.bStartPenetrating && ShouldCheckForValidLandingSpot(timeTick, Adjusted, Hit))
 			{
-				// Compute impact deflection based on final velocity, not integration step.
-				// This allows us to compute a new velocity from the deflected vector, and ensures the full gravity effect is included in the slide result.
-				Adjusted = Velocity * timeTick;
-
-				// See if we can convert a normally invalid landing spot (based on the hit result) to a usable one.
-				if (!Hit.bStartPenetrating && ShouldCheckForValidLandingSpot(timeTick, Adjusted, Hit))
+				const FVector PawnLocation = UpdatedComponent->GetComponentLocation();
+				FFindFloorResult FloorResult;
+				FindFloor(PawnLocation, FloorResult, false);
+				if (FloorResult.IsWalkableFloor() && IsValidLandingSpot(PawnLocation, FloorResult.HitResult))
 				{
-					const FVector PawnLocation = UpdatedComponent->GetComponentLocation();
-					FFindFloorResult FloorResult;
-					FindFloor(PawnLocation, FloorResult, false);
-					if (FloorResult.IsWalkableFloor() && IsValidLandingSpot(PawnLocation, FloorResult.HitResult))
-					{
-						remainingTime += subTimeTickRemaining;
-						ProcessLanded(FloorResult.HitResult, remainingTime, Iterations);
-						return;
-					}
-				}
-
-				HandleImpact(Hit, LastMoveTimeSlice, Adjusted);
-
-				// If we've changed physics mode, abort.
-				if (!HasValidData())
-				{
+					remainingTime += subTimeTickRemaining;
+					ProcessLanded(FloorResult.HitResult, remainingTime, Iterations);
 					return;
 				}
+			}
 
-				const FVector OldHitNormal = Hit.Normal;
-				const FVector OldHitImpactNormal = Hit.ImpactNormal;
-				FVector Delta = ComputeSlideVector(Adjusted, 1.f - Hit.Time, OldHitNormal, Hit);
+			HandleImpact(Hit, LastMoveTimeSlice, Adjusted);
 
-				// Compute velocity after deflection (only gravity component for RootMotion)
-				const UPrimitiveComponent* HitComponent = Hit.GetComponent();
-				if (!Velocity.IsNearlyZero() && MovementBaseUtility::IsSimulatedBase(HitComponent))
+			// If we've changed physics mode, abort.
+			if (!HasValidData())
+			{
+				return;
+			}
+
+			const FVector OldHitNormal = Hit.Normal;
+			const FVector OldHitImpactNormal = Hit.ImpactNormal;
+			FVector Delta = ComputeSlideVector(Adjusted, 1.f - Hit.Time, OldHitNormal, Hit);
+
+			// Compute velocity after deflection (only gravity component for RootMotion)
+			const UPrimitiveComponent* HitComponent = Hit.GetComponent();
+			if (!Velocity.IsNearlyZero() && MovementBaseUtility::IsSimulatedBase(HitComponent))
+			{
+				const FVector ContactVelocity = MovementBaseUtility::GetMovementBaseVelocity(HitComponent, NAME_None) + MovementBaseUtility::GetMovementBaseTangentialVelocity(HitComponent, NAME_None, Hit.ImpactPoint);
+				const FVector NewVelocity = Velocity - Hit.ImpactNormal * FVector::DotProduct(Velocity - ContactVelocity, Hit.ImpactNormal);
+				Velocity = HasAnimRootMotion() || CurrentRootMotion.HasOverrideVelocityWithIgnoreZAccumulate() ? FVector(Velocity.X, Velocity.Y, NewVelocity.Z) : NewVelocity;
+			}
+			else if (subTimeTickRemaining > KINDA_SMALL_NUMBER && !bJustTeleported)
+			{
+				const FVector NewVelocity = (Delta / subTimeTickRemaining);
+				Velocity = HasAnimRootMotion() || CurrentRootMotion.HasOverrideVelocityWithIgnoreZAccumulate() ? FVector(Velocity.X, Velocity.Y, NewVelocity.Z) : NewVelocity;
+			}
+
+			if (subTimeTickRemaining > KINDA_SMALL_NUMBER && (Delta | Adjusted) > 0.f)
+			{
+				// Move in deflected direction.
+				SafeMoveUpdatedComponent(Delta, PawnRotation, true, Hit);
+
+				if (Hit.bBlockingHit)
 				{
-					const FVector ContactVelocity = MovementBaseUtility::GetMovementBaseVelocity(HitComponent, NAME_None) + MovementBaseUtility::GetMovementBaseTangentialVelocity(HitComponent, NAME_None, Hit.ImpactPoint);
-					const FVector NewVelocity = Velocity - Hit.ImpactNormal * FVector::DotProduct(Velocity - ContactVelocity, Hit.ImpactNormal);
-					Velocity = HasAnimRootMotion() || CurrentRootMotion.HasOverrideVelocityWithIgnoreZAccumulate() ? FVector(Velocity.X, Velocity.Y, NewVelocity.Z) : NewVelocity;
-				}
-				else if (subTimeTickRemaining > KINDA_SMALL_NUMBER && !bJustTeleported)
-				{
-					const FVector NewVelocity = (Delta / subTimeTickRemaining);
-					Velocity = HasAnimRootMotion() || CurrentRootMotion.HasOverrideVelocityWithIgnoreZAccumulate() ? FVector(Velocity.X, Velocity.Y, NewVelocity.Z) : NewVelocity;
-				}
+					// hit second wall
+					LastMoveTimeSlice = subTimeTickRemaining;
+					subTimeTickRemaining = subTimeTickRemaining * (1.f - Hit.Time);
 
-				if (subTimeTickRemaining > KINDA_SMALL_NUMBER && (Delta | Adjusted) > 0.f)
-				{
-					// Move in deflected direction.
-					SafeMoveUpdatedComponent(Delta, PawnRotation, true, Hit);
-
-					if (Hit.bBlockingHit)
+					if (IsValidLandingSpot(UpdatedComponent->GetComponentLocation(), Hit))
 					{
-						// hit second wall
-						LastMoveTimeSlice = subTimeTickRemaining;
-						subTimeTickRemaining = subTimeTickRemaining * (1.f - Hit.Time);
+						remainingTime += subTimeTickRemaining;
+						ProcessLanded(Hit, remainingTime, Iterations);
+						return;
+					}
 
-						if (IsValidLandingSpot(UpdatedComponent->GetComponentLocation(), Hit))
+					HandleImpact(Hit, LastMoveTimeSlice, Delta);
+
+					// If we've changed physics mode, abort.
+					if (!HasValidData() || !IsFalling())
+					{
+						return;
+					}
+
+					FVector PreTwoWallDelta = Delta;
+					TwoWallAdjust(Delta, Hit, OldHitNormal);
+
+					// Compute velocity after deflection (only gravity component for RootMotion)
+					if (subTimeTickRemaining > KINDA_SMALL_NUMBER && !bJustTeleported)
+					{
+						const FVector NewVelocity = (Delta / subTimeTickRemaining);
+						Velocity = HasAnimRootMotion() || CurrentRootMotion.HasOverrideVelocityWithIgnoreZAccumulate() ? FVector(Velocity.X, Velocity.Y, NewVelocity.Z) : NewVelocity;
+					}
+
+					// bDitch=true means that pawn is straddling two slopes, neither of which he can stand on
+					bool bDitch = ((OldHitImpactNormal.Z > 0.f) && (Hit.ImpactNormal.Z > 0.f) && (FMath::Abs(Delta.Z) <= KINDA_SMALL_NUMBER) && ((Hit.ImpactNormal | OldHitImpactNormal) < 0.f));
+					SafeMoveUpdatedComponent(Delta, PawnRotation, true, Hit);
+					if (Hit.Time == 0.f)
+					{
+						// if we are stuck then try to side step
+						FVector SideDelta = (OldHitNormal + Hit.ImpactNormal).GetSafeNormal2D();
+						if (SideDelta.IsNearlyZero())
 						{
-							remainingTime += subTimeTickRemaining;
-							ProcessLanded(Hit, remainingTime, Iterations);
-							return;
+							SideDelta = FVector(OldHitNormal.Y, -OldHitNormal.X, 0).GetSafeNormal();
 						}
-
-						HandleImpact(Hit, LastMoveTimeSlice, Delta);
-
-						// If we've changed physics mode, abort.
-						if (!HasValidData() || !IsFalling())
-						{
-							return;
-						}
-
-						FVector PreTwoWallDelta = Delta;
-						TwoWallAdjust(Delta, Hit, OldHitNormal);
-
-						// Compute velocity after deflection (only gravity component for RootMotion)
-						if (subTimeTickRemaining > KINDA_SMALL_NUMBER && !bJustTeleported)
-						{
-							const FVector NewVelocity = (Delta / subTimeTickRemaining);
-							Velocity = HasAnimRootMotion() || CurrentRootMotion.HasOverrideVelocityWithIgnoreZAccumulate() ? FVector(Velocity.X, Velocity.Y, NewVelocity.Z) : NewVelocity;
-						}
-
-						// bDitch=true means that pawn is straddling two slopes, neither of which he can stand on
-						bool bDitch = ((OldHitImpactNormal.Z > 0.f) && (Hit.ImpactNormal.Z > 0.f) && (FMath::Abs(Delta.Z) <= KINDA_SMALL_NUMBER) && ((Hit.ImpactNormal | OldHitImpactNormal) < 0.f));
-						SafeMoveUpdatedComponent(Delta, PawnRotation, true, Hit);
-						if (Hit.Time == 0.f)
-						{
-							// if we are stuck then try to side step
-							FVector SideDelta = (OldHitNormal + Hit.ImpactNormal).GetSafeNormal2D();
-							if (SideDelta.IsNearlyZero())
-							{
-								SideDelta = FVector(OldHitNormal.Y, -OldHitNormal.X, 0).GetSafeNormal();
-							}
-							SafeMoveUpdatedComponent(SideDelta, PawnRotation, true, Hit);
-						}
+						SafeMoveUpdatedComponent(SideDelta, PawnRotation, true, Hit);
 					}
 				}
 			}
 		}
 
 		if (Velocity.SizeSquared2D() <= KINDA_SMALL_NUMBER * 10.f)
-		{
+		{			
 			Velocity.X = 0.f;
 			Velocity.Y = 0.f;
 			TetherCutoffTimer += timeTick;
-			if (TetherCutoffTimer >= TetherCutoff) 
-			{
-				TetherCutoffTimer = 0;
-				// todo: this shouldn't be hardcoded, unify behavior between cpp/bp
-				GravityScale = 3.33;
-				GroundFriction = 8;
-				SetMovementMode(EMovementMode::MOVE_Falling);
-			}
 		}
 		else 
+		{	
+			TetherCutoffTimer = 0;
+		}
+
+		if (TetherCutoffTimer >= TetherCutoff)
 		{
 			TetherCutoffTimer = 0;
+			// todo: this shouldn't be hardcoded, unify behavior between cpp/bp
+			GravityScale = 3.33;
+			GroundFriction = 8;
+			SetMovementMode(EMovementMode::MOVE_Falling);
 		}
 	}
 }
