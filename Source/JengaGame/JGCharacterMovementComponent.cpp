@@ -189,6 +189,10 @@ void UJGCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations
 			}
 		}
 
+		if (this->GetActorLocation().Z > TetherActor->GetActorLocation().Z) 
+		{
+			Velocity.Z = 0.f;
+		}
 		if (Velocity.SizeSquared2D() <= KINDA_SMALL_NUMBER * 10.f)
 		{			
 			Velocity.X = 0.f;
