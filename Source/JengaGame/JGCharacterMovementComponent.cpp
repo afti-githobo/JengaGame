@@ -49,13 +49,18 @@ void UJGCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations
 
 		// Tether forces
 
-		if (!this->TetherActor.IsNull())
+		if (TetherCutoffTimer < TetherCutoff)
 		{
 			FVector baseForce = FVector((this->TetherForce) / timeTick, 0, 0); UCharacterMovementComponent::PhysFalling(deltaTime, Iterations);
-			FRotator LookAtRot = UKismetMathLibrary::FindLookAtRotation(this->GetActorLocation(), this->TetherActor.Get()->GetActorLocation());
+			FRotator LookAtRot = UKismetMathLibrary::FindLookAtRotation(this->GetActorLocation(), this->TetherActor.Get()->GetActorLocation()) ;
 			FVector Force = LookAtRot.RotateVector(baseForce);
 			this->AddForce(Force);
-			TetherActor.Get()->FindComponentByClass<UPrimitiveComponent>()->AddForce(-Force);
+			AActor* actor = TetherActor.Get();
+			AActor* parent = actor->GetAttachParentActor();
+			if (parent != nullptr) {
+				parent->FindComponentByClass<UPrimitiveComponent>()->AddForce(-Force);
+			}
+			
 		}
 
 		//UE_LOG(LogCharacterMovement, Log, TEXT("dt=(%.6f) OldLocation=(%s) OldVelocity=(%s) OldVelocityWithRootMotion=(%s) NewVelocity=(%s)"), timeTick, *(UpdatedComponent->GetComponentLocation()).ToString(), *OldVelocity.ToString(), *OldVelocityWithRootMotion.ToString(), *Velocity.ToString());
@@ -69,7 +74,7 @@ void UJGCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations
 		FHitResult Hit(1.f);
 		SafeMoveUpdatedComponent(Adjusted, PawnRotation, true, Hit);
 
-		if (Hit.GetActor() == TetherActor) {
+		if (Hit.GetActor() == TetherActor.Get()->GetAttachParentActor() && Hit.GetActor() != nullptr) {
 			TetherCutoffTimer = 0;
 			// todo: this shouldn't be hardcoded, unify behavior between cpp/bp
 			GravityScale = 3.33;
